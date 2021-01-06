@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
 Get-EASDeviceReport.ps1 - Exchange Server ActiveSync device report
 
@@ -23,21 +23,33 @@ Sends an email report with CSV file attached for all ActiveSync devices.
 .\Get-EASDeviceReport.ps1 -Age 30
 Limits the report to devices that have not attempted synced in more than 30 days.
 
+.EXAMPLE
+.\Get-EASDeviceReport.ps1 -SendEmail -MailFrom:exchangeserver@exchangeserverpro.net -MailTo:paul@exchangeserverpro.com -MailServer:smtp.exchangeserverpro.net -SkipBlankEmail -Age 30
+Sends an email report with CSV file attached for all activesync devices that have not attempted synced in more than 30 days. Will not send an email if the report contains no records
+
+
 .NOTES
 Written by: Paul Cunningham
+Forked and Updated by: James Kinsman
 
-Find me on:
+Find Paul on:
 
 * My Blog:	https://paulcunningham.me
 * Twitter:	https://twitter.com/paulcunningham
 * LinkedIn:	https://au.linkedin.com/in/cunninghamp/
 * Github:	https://github.com/cunninghamp
 
+Find James on:
+
+* Twitter:	https://twitter.com/vibroaxe
+* LinkedIn:	https://linkedin.com/in/jameskinsman/
+* Github:	https://github.com/vibroxe
+
 License:
 
 The MIT License (MIT)
 
-Copyright (c) 2015 Paul Cunningham
+Copyright (c) 2015 Paul Cunningham, James Kinsman
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -62,6 +74,7 @@ V1.00, 25/11/2013 - Initial version
 V1.01, 11/02/2014 - Added parameters for emailing the report and specifying an "age" to report on
 V1.02, 17/02/2014 - Fixed missing $mydir variable and added UTF8 encoding to Export-CSV and Send-MailMessage
 V1.03, 19/02/2016 - Added OrganizationalUnit to report, plus minor fixes
+v1.04, 06/01/2021 - Added filter to avoid sending report email if no devices found
 #>
 
 #requires -version 2
@@ -71,6 +84,9 @@ param (
 	
 	[Parameter( Mandatory=$false)]
 	[switch]$SendEmail,
+	
+	[Parameter( Mandatory=$false)]
+	[switch]$SkipBlankEmail,
 
 	[Parameter( Mandatory=$false)]
 	[string]$MailFrom,
@@ -119,7 +135,7 @@ $reportfile = "$myDir\ExchangeActiveSyncDeviceReport.csv"
 $smtpsettings = @{
 	To =  $MailTo
 	From = $MailFrom
-    Subject = $reportemailsubject
+	Subject = $reportemailsubject
 	SmtpServer = $MailServer
 	}
 
@@ -156,6 +172,8 @@ $MailboxesWithEASDevices = @(Get-CASMailbox -Resultsize Unlimited | Where {$_.Ha
 
 Write-Host "$($MailboxesWithEASDevices.count) mailboxes with EAS device partnerships"
 
+$reportedDeviceCount = 0
+
 Foreach ($Mailbox in $MailboxesWithEASDevices)
 {
     
@@ -184,7 +202,7 @@ Foreach ($Mailbox in $MailboxesWithEASDevices)
         if ($syncAge -ge $Age -or $syncAge -eq "Never")
         {
             Write-Host -ForegroundColor Yellow "$($EASDevice.DeviceID) sync age of $syncAge days is greater than $age, adding to report"
-
+	    
             $reportObj = New-Object PSObject
             $reportObj | Add-Member NoteProperty -Name "Display Name" -Value $MailboxInfo.DisplayName
             $reportObj | Add-Member NoteProperty -Name "Organizational Unit" -Value $MailboxInfo.OrganizationalUnit
@@ -197,11 +215,13 @@ Foreach ($Mailbox in $MailboxesWithEASDevices)
             }
 
             $report += $reportObj
+	    
+	    $reportedDeviceCount++
         }
     }
 }
 
-Write-Host -ForegroundColor White "Saving report to $reportfile"
+Write-Host -ForegroundColor White "Saving report to $reportfile with $reportedDeviceCount records"
 $report | Export-Csv -NoTypeInformation $reportfile -Encoding UTF8
 
 
@@ -230,6 +250,11 @@ if ($SendEmail)
 	$htmltail = "</body></html>"	
 
 	$htmlreport = $htmlhead + $reporthtml + $htmltail
-
-	Send-MailMessage @smtpsettings -Body $htmlreport -BodyAsHtml -Encoding ([System.Text.Encoding]::UTF8) -Attachments $reportfile
+	
+	if (!$SkipBlankEmail -or $reportedDeviceCount -gt 0) {
+		Write-Host -ForegroundColor White "Emailing copy of report to @smtpsettings.to"
+		Send-MailMessage @smtpsettings -Body $htmlreport -BodyAsHtml -Encoding ([System.Text.Encoding]::UTF8) -Attachments $reportfile
+	} else {
+		Write-Host -ForegroundColor Yellow "Not emailing empty report"
+	}
 }
